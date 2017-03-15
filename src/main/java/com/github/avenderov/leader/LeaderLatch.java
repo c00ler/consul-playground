@@ -10,7 +10,7 @@ public interface LeaderLatch extends AutoCloseable {
 
     enum State {
 
-        NEW, STARTED, CLOSED
+        NEW, STARTED, STOPPED
 
     }
 

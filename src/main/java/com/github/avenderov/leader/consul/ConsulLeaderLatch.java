@@ -16,6 +16,8 @@ public final class ConsulLeaderLatch implements LeaderLatch {
 
     private static final Logger LOG = LoggerFactory.getLogger(ConsulLeaderLatch.class);
 
+    private final Object lifecycleMonitor = new Object();
+
     private final AtomicReference<State> state = new AtomicReference<>(State.NEW);
 
     private final AtomicBoolean leader = new AtomicBoolean();
@@ -38,31 +40,33 @@ public final class ConsulLeaderLatch implements LeaderLatch {
 
     @Override
     public void start() {
-        if (state.get() != State.NEW) {
-            return;
+        synchronized (this.lifecycleMonitor) {
+            if (state.get() != State.NEW) {
+                return;
+            }
+
+            final Session session = ImmutableSession.builder()
+                    .name(String.format("session-%s-%s", applicationName, UUID.randomUUID().toString()))
+                    .lockDelay("15s")
+                    .ttl("0s")
+                    .addChecks("serfHealth")
+                    .build();
+
+            final String newSessionId = consul.sessionClient().createSession(session).getId();
+            LOG.info("New session id: {}", newSessionId);
+
+            sessionId.set(newSessionId);
+
+            final String lockKey = String.format("service/%s/leader", applicationName);
+            final boolean acquired = consul.keyValueClient().acquireLock(lockKey, sessionId.get());
+            LOG.info("Lock for the queue {} acquired: {}", lockKey, acquired);
+
+            leader.set(acquired);
+
+            // TODO: start listening for the changes
+
+            state.set(State.STARTED);
         }
-
-        final Session session = ImmutableSession.builder()
-                .name(String.format("session-%s-%s", applicationName, UUID.randomUUID().toString()))
-                .lockDelay("15s")
-                .ttl("0s")
-                .addChecks("serfHealth")
-                .build();
-
-        final String newSessionId = consul.sessionClient().createSession(session).getId();
-        LOG.info("New session id: {}", newSessionId);
-
-        sessionId.set(newSessionId);
-
-        final String lockKey = String.format("service/%s/leader", applicationName);
-        final boolean acquired = consul.keyValueClient().acquireLock(lockKey, sessionId.get());
-        LOG.info("Lock for the queue {} acquired: {}", lockKey, acquired);
-
-        leader.set(acquired);
-
-        // TODO: start listening for the changes
-
-        state.set(State.STARTED);
     }
 
     @Override
@@ -72,12 +76,15 @@ public final class ConsulLeaderLatch implements LeaderLatch {
 
     @Override
     public void close() throws Exception {
-        if (state.get() == State.STARTED) {
-            consul.sessionClient().destroySession(sessionId.get());
+        synchronized (this.lifecycleMonitor) {
+            if (state.get() != State.STARTED) {
+                return;
+            }
 
+            consul.sessionClient().destroySession(sessionId.get());
             LOG.info("Session {} deleted", sessionId.get());
 
-            state.set(State.CLOSED);
+            state.set(State.STOPPED);
         }
     }
 
