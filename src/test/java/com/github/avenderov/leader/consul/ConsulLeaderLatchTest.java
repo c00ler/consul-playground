@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ConsulLeaderLatchTest {
 
     private final ConsulLeaderLatch leaderLatch =
-            new ConsulLeaderLatch(new ConsulLeaderLatchProperties.Builder().applicationName("app").build());
+            new ConsulLeaderLatch(new ConsulLeaderLatchProperties.Builder().applicationName("app").ping(false).build());
 
     @Test
     public void notLeaderWhenNew() {

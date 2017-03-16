@@ -9,9 +9,12 @@ import com.orbitz.consul.cache.KVCache;
 import com.orbitz.consul.model.kv.Value;
 import com.orbitz.consul.model.session.ImmutableSession;
 import com.orbitz.consul.model.session.Session;
+import com.orbitz.consul.model.session.SessionCreatedResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -26,35 +29,34 @@ public final class ConsulLeaderLatch implements LeaderLatch {
 
     private final AtomicReference<State> state = new AtomicReference<>(State.NEW);
 
+    private final AtomicReference<String> sessionId = new AtomicReference<>();
+
     private final AtomicBoolean leader = new AtomicBoolean();
 
-    private final String name;
+    private final String sessionName;
 
     private final String lockKey;
-
-    private final String sessionId;
 
     private final Consul consul;
 
     private final KVCache kvCache;
 
     public ConsulLeaderLatch(final ConsulLeaderLatchProperties properties) {
-        this.consul = Consul.builder().build();
-
-        this.name = String.format("session-%s-%s", properties.getApplicationName(), UUID.randomUUID().toString());
-        final Session session = ImmutableSession.builder()
-                .name(name)
-                .lockDelay("15s")
-                .ttl("0s")
-                .addChecks("serfHealth")
+        this.consul = Consul.builder()
+                .withPing(properties.isPing())
                 .build();
-        this.sessionId = consul.sessionClient().createSession(session).getId();
-        LOG.info("Session id: {}", this.sessionId);
 
+        this.sessionName =
+                String.format("session-%s-%s", properties.getApplicationName(), UUID.randomUUID().toString());
         this.lockKey = String.format("service/%s/leader", properties.getApplicationName());
-        final Consul asyncCallsConsul = Consul.builder().withReadTimeoutMillis(TimeUnit.SECONDS.toMillis(30L)).build();
-        final KVCache kvCache = KVCache.newCache(asyncCallsConsul.keyValueClient(), lockKey, 15);
+
+        final Consul asyncCallsConsul = Consul.builder()
+                .withReadTimeoutMillis(TimeUnit.SECONDS.toMillis(45L))
+                .withPing(properties.isPing())
+                .build();
+        final KVCache kvCache = KVCache.newCache(asyncCallsConsul.keyValueClient(), lockKey, 30);
         kvCache.addListener(new KeyChangeListener());
+
         this.kvCache = kvCache;
     }
 
@@ -83,19 +85,44 @@ public final class ConsulLeaderLatch implements LeaderLatch {
     }
 
     private void tryAcquireLock() {
-        final boolean acquired = consul.keyValueClient().acquireLock(lockKey, sessionId);
+        if (sessionId.get() == null || consul.sessionClient().getSessionInfo(sessionId.get()).orNull() == null) {
+            createSession();
+        }
+
+        final boolean acquired = consul.keyValueClient().acquireLock(lockKey, sessionId.get());
         LOG.info("Lock for the key {} acquired: {}", lockKey, acquired);
 
         leader.set(acquired);
     }
 
+    private void createSession() {
+        final Session session = ImmutableSession.builder()
+                .name(sessionName)
+                .lockDelay("15s")
+                .ttl("0s")
+                .addChecks("serfHealth")
+                .build();
+
+        final SessionCreatedResponse response = consul.sessionClient().createSession(session);
+        LOG.info("Session {} has the new id: {}", sessionName, response.getId());
+
+        this.sessionId.set(response.getId());
+    }
+
+    @Nonnull
     @Override
     public State getState() {
         return state.get();
     }
 
-    public String getName() {
-        return name;
+    @Nonnull
+    public String getSessionName() {
+        return sessionName;
+    }
+
+    @Nullable
+    public String getSessionId() {
+        return sessionId.get();
     }
 
     @Override
@@ -105,11 +132,18 @@ public final class ConsulLeaderLatch implements LeaderLatch {
                 return;
             }
 
-            kvCache.stop();
-            consul.sessionClient().destroySession(sessionId);
-            LOG.info("Session {} deleted", sessionId);
+            try {
+                kvCache.stop();
+                if (consul.sessionClient().getSessionInfo(sessionId.get()).isPresent()) {
+                    final boolean released = consul.keyValueClient().releaseLock(lockKey, sessionId.get());
+                    LOG.info("Lock for the key {} released: {}", lockKey, released);
 
-            state.set(State.STOPPED);
+                    consul.sessionClient().destroySession(sessionId.get());
+                    LOG.info("Session {} deleted", sessionId.get());
+                }
+            } finally {
+                state.set(State.STOPPED);
+            }
         }
     }
 
@@ -121,9 +155,7 @@ public final class ConsulLeaderLatch implements LeaderLatch {
             final Optional<String> sessionOpt = value.getSession();
 
             if (sessionOpt.isPresent()) {
-                final String session = sessionOpt.get();
-
-                final boolean oldValue = leader.getAndSet(sessionId.equals(session));
+                leader.set(sessionId.get().equals(sessionOpt.get()));
             } else {
                 tryAcquireLock();
             }
