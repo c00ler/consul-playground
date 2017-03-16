@@ -1,0 +1,8 @@
+version: '2'
+services:
+  dev-consul:
+    image: "consul"
+    container_name: "dev-consul"
+    ports:
+      - "8400:8400"
+      - "8500:8500"
