@@ -16,4 +16,15 @@ public class ConsulLeaderLatchTest {
         assertThat(leaderLatch.isLeader()).isFalse();
     }
 
+    @Test
+    public void getSessionName() {
+        assertThat(leaderLatch.getSessionName()).startsWith("session-app");
+    }
+
+    @Test
+    public void noSessionIdWhenNew() {
+        assertThat(leaderLatch.getState()).isSameAs(LeaderLatch.State.NEW);
+        assertThat(leaderLatch.getSessionId()).isNull();
+    }
+
 }
