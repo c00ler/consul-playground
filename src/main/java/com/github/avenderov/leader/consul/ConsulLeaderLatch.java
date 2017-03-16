@@ -10,6 +10,8 @@ import com.orbitz.consul.model.kv.Value;
 import com.orbitz.consul.model.session.ImmutableSession;
 import com.orbitz.consul.model.session.Session;
 import com.orbitz.consul.model.session.SessionCreatedResponse;
+import com.orbitz.consul.option.ConsistencyMode;
+import com.orbitz.consul.option.ImmutableQueryOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,7 +56,12 @@ public final class ConsulLeaderLatch implements LeaderLatch {
                 .withReadTimeoutMillis(TimeUnit.SECONDS.toMillis(45L))
                 .withPing(properties.isPing())
                 .build();
-        final KVCache kvCache = KVCache.newCache(asyncCallsConsul.keyValueClient(), lockKey, 30);
+        final KVCache kvCache = KVCache.newCache(asyncCallsConsul.keyValueClient(),
+                                                 lockKey,
+                                                 30,
+                                                 ImmutableQueryOptions.builder()
+                                                         .consistencyMode(ConsistencyMode.CONSISTENT)
+                                                         .build());
         kvCache.addListener(new KeyChangeListener());
 
         this.kvCache = kvCache;

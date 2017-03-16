@@ -1,11 +1,12 @@
 package com.github.avenderov;
 
-import com.github.avenderov.leader.LeaderLatch;
+import com.github.avenderov.leader.consul.ConsulInfoContributor;
 import com.github.avenderov.leader.consul.ConsulLeaderLatch;
 import com.github.avenderov.leader.consul.ConsulLeaderLatchProperties;
 import com.orbitz.consul.Consul;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.actuate.info.InfoContributor;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
@@ -20,13 +21,15 @@ public class Launcher {
         return Consul.builder().build();
     }
 
-    @Bean
-    public LeaderLatch leaderLatch() {
-        final ConsulLeaderLatch leaderLatch = new ConsulLeaderLatch(
+    @Bean(initMethod = "start")
+    public ConsulLeaderLatch leaderLatch() {
+        return new ConsulLeaderLatch(
                 new ConsulLeaderLatchProperties.Builder().applicationName(applicationName).build());
-        leaderLatch.start();
+    }
 
-        return leaderLatch;
+    @Bean
+    public InfoContributor consulInfoContributor(final ConsulLeaderLatch leaderLatch) {
+        return new ConsulInfoContributor(leaderLatch);
     }
 
     public static void main(String[] args) {
