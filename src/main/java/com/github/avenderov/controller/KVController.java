@@ -1,6 +1,6 @@
-package com.github.avenderov.controllers;
+package com.github.avenderov.controller;
 
-import com.github.avenderov.exceptions.NotFoundException;
+import com.github.avenderov.exception.NotFoundException;
 import com.orbitz.consul.Consul;
 import com.orbitz.consul.KeyValueClient;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -29,7 +29,7 @@ class KVController {
     private final KeyValueClient keyValueClient;
 
     @Autowired
-    public KVController(final Consul consul) {
+    KVController(final Consul consul) {
         this.keyValueClient = consul.keyValueClient();
     }
 

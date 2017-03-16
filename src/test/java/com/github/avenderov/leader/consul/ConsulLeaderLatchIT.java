@@ -53,6 +53,21 @@ public class ConsulLeaderLatchIT {
     }
 
     @Test
+    public void leaderAfterRelease() {
+        leaderLatch.start();
+
+        await().atMost(10, TimeUnit.SECONDS).until(leaderLatch::isLeader);
+
+        final String sessionId = leaderLatch.getSessionId();
+        final boolean released = consul.keyValueClient().releaseLock("service/app/leader", sessionId);
+
+        assertThat(released).isTrue();
+
+        await().atMost(10, TimeUnit.SECONDS).until(leaderLatch::isLeader);
+        assertThat(leaderLatch.getSessionId()).isEqualTo(sessionId);
+    }
+
+    @Test
     public void releaseSessionWhenStopped() throws Exception {
         leaderLatch.start();
 
